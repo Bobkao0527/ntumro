@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NTU SmartPath - 自動定位優化版</title>
+    <title>NTU SmartPath - 穩定導航系統</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
@@ -11,6 +11,19 @@
         #map-container { position: relative; width: 100%; flex-grow: 1; background: #020617; border-radius: 1rem; overflow: hidden; border: 1px solid #334155; }
         canvas { width: 100%; height: 100%; cursor: crosshair; }
         .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); }
+        
+        /* 真實位置藍點動畫 */
+        .user-dot-pulse {
+            position: absolute; width: 12px; height: 12px; background: #3b82f6; border: 2px solid white;
+            border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none;
+            box-shadow: 0 0 10px #3b82f6; z-index: 5;
+        }
+        .user-dot-pulse::after {
+            content: ''; position: absolute; top: -4px; left: -4px; right: -4px; bottom: -4px;
+            border-radius: 50%; border: 2px solid #3b82f6; animation: ripple 1.5s infinite;
+        }
+        @keyframes ripple { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(3); opacity: 0; } }
+        
         .loader { border: 3px solid #334155; border-top: 3px solid #10b981; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: inline-block; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -21,10 +34,9 @@
     <header class="flex justify-between items-center shrink-0">
         <div>
             <h1 class="text-xl md:text-2xl font-bold text-emerald-500 flex items-center gap-2">
-                <span class="bg-emerald-600 text-white px-2 py-0.5 rounded text-sm md:text-lg">LIVE</span> 
                 NTU SmartPath
             </h1>
-            <p class="text-slate-400 text-[10px] md:text-xs mt-1">智慧校區自動導航系統</p>
+            <p class="text-slate-400 text-[10px] md:text-xs mt-1">智慧校區穩定導航 (起點已鎖定)</p>
         </div>
         <div id="sync-status" class="flex items-center gap-2 text-[10px] md:text-xs text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
             <span id="status-dot" class="flex h-2 w-2 rounded-full bg-slate-500"></span>
@@ -35,45 +47,53 @@
     <div class="flex flex-col lg:flex-row gap-4 flex-grow min-h-0">
         <!-- Sidebar -->
         <div class="lg:w-80 space-y-4 shrink-0 flex flex-col">
-            <!-- 導航指引面版 -->
-            <div class="glass-panel p-5 rounded-2xl border-l-4 border-emerald-500 shadow-xl">
-                <h2 class="text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">導航指引</h2>
+            <!-- 導航資訊 -->
+            <div class="glass-panel p-5 rounded-2xl border-l-4 border-blue-500 shadow-xl">
+                <h2 class="text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">導航狀態</h2>
                 <div class="space-y-3">
                     <div class="flex items-center gap-3">
                         <div class="text-3xl" id="nav-icon">📍</div>
                         <div class="min-w-0">
-                            <div id="nav-text" class="font-bold text-base text-emerald-400 truncate">正在獲取位置...</div>
-                            <div id="nav-dist" class="text-xs text-slate-400 italic">請確保已開啟 GPS 定位權限</div>
+                            <div id="nav-text" class="font-bold text-base text-blue-400 truncate">請在地圖選擇終點</div>
+                            <div id="nav-dist" class="text-xs text-slate-400">起點將固定於出發位置</div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- 新增：使用者定位狀態顯示欄位 -->
+            <!-- GPS 監測器 -->
             <div class="glass-panel p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
                 <div class="flex justify-between items-center mb-2">
-                    <span class="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">當前 GPS 座標</span>
+                    <span class="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">真實位置 (GPS)</span>
                     <span id="gps-indicator" class="flex h-2 w-2 rounded-full bg-red-500"></span>
                 </div>
-                <div id="user-coords" class="font-mono text-sm text-emerald-500/80">等待訊號...</div>
-                <div id="user-region" class="text-[10px] text-slate-500 mt-1 italic">尚未偵測校區</div>
+                <div id="user-coords" class="font-mono text-xs text-blue-400/80">等待訊號...</div>
+                <div class="mt-2 pt-2 border-t border-slate-700 flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-blue-500"></div>
+                    <span class="text-[10px] text-slate-400">藍點：你現在的位置</span>
+                </div>
+                <div class="mt-1 flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                    <span class="text-[10px] text-slate-400">綠點：導航路徑起點</span>
+                </div>
             </div>
 
-            <div class="flex-grow hidden lg:block"></div>
+            <div class="flex-grow"></div>
 
-            <div class="grid grid-cols-2 gap-2 shrink-0">
-                <button onclick="refreshData()" class="bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl text-xs transition font-bold shadow-lg shadow-emerald-900/20">偵測目前定位</button>
-                <button onclick="resetPath()" class="bg-slate-800 hover:bg-slate-700 py-3 rounded-xl text-xs transition border border-white/5 text-slate-400">清除路徑</button>
+            <div class="grid grid-cols-1 gap-2 shrink-0">
+                <button onclick="relockStart()" class="bg-blue-600 hover:bg-blue-500 py-3 rounded-xl text-xs transition font-bold text-white">更新起點至目前位置</button>
+                <button onclick="resetPath()" class="bg-slate-800 hover:bg-slate-700 py-3 rounded-xl text-xs transition border border-white/5 text-slate-400">重設終點</button>
             </div>
         </div>
 
         <!-- Map Area -->
         <div id="map-container" class="flex-grow">
             <canvas id="mapCanvas"></canvas>
-            <div id="loading-overlay" class="absolute inset-0 bg-slate-900/90 flex items-center justify-center z-10 transition-opacity duration-500">
+            <div id="user-marker" class="user-dot-pulse hidden"></div>
+            <div id="loading-overlay" class="absolute inset-0 bg-slate-900/90 flex items-center justify-center z-10">
                 <div class="text-center p-6">
-                    <div id="loader-icon" class="loader mb-4"></div>
-                    <div class="text-sm text-slate-400 font-mono" id="loader-msg">正在啟動定位傳感器...</div>
+                    <div class="loader mb-4"></div>
+                    <div class="text-sm text-slate-400 font-mono">載入地圖並取得初次定位...</div>
                 </div>
             </div>
         </div>
@@ -84,308 +104,199 @@
         const ctx = canvas.getContext('2d');
         const navText = document.getElementById('nav-text');
         const navDist = document.getElementById('nav-dist');
-        const syncStatusText = document.getElementById('status-text');
-        const statusDot = document.getElementById('status-dot');
-        const loadingOverlay = document.getElementById('loading-overlay');
-        const loaderMsg = document.getElementById('loader-msg');
-        const loaderIcon = document.getElementById('loader-icon');
-        
-        // 座標顯示相關元素
+        const userMarker = document.getElementById('user-marker');
         const userCoordsEl = document.getElementById('user-coords');
-        const userRegionEl = document.getElementById('user-region');
         const gpsIndicator = document.getElementById('gps-indicator');
+        const loadingOverlay = document.getElementById('loading-overlay');
 
-        let width, height;
-        let nodes = [];
-        let edges = [];
-        let startId = null;
-        let endId = null;
-        let path = [];
-        let geoExtents = null;
-
-        const CAMPUS_LOCATIONS = {
-            MAIN: { lat: 25.02180650520415, lng: 121.53558321819456, name: "校本部" },
-            CHENG_ZHONG: { lat: 25.03966262430704, lng: 121.5197371805903, name: "城中校區" }
-        };
+        let nodes = [], edges = [], path = [];
+        let startId = null, endId = null;
+        let width, height, geoExtents = null;
+        let isStartLocked = false; // 是否已鎖定起始點
+        let lastKnownPos = null;
 
         const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTpvlZRFEaEAWJxpF58fNWLnZuq7AUPFApMLme3V3c0JkdsGdgVrZSKxwj2VlTOKDvbX6ZJSmiokFA1/pub?output=csv";
 
-        async function fetchSheetData() {
-            updateSyncStatus('syncing', '正在讀取...');
+        async function init() {
             try {
-                const response = await fetch(`${CSV_URL}&t=${Date.now()}`);
-                if (!response.ok) throw new Error("CSV 請求失敗");
-                const csvText = await response.text();
-                parseCSV(csvText);
-                
-                await tryAutoRouting();
-                
-                fadeOutOverlay();
-                updateSyncStatus('success', '同步成功');
-            } catch (err) {
-                showError(err.message);
-            }
+                const res = await fetch(CSV_URL);
+                const text = await res.text();
+                parseCSV(text);
+                startTracking();
+                resize();
+            } catch (e) { console.error(e); }
         }
 
         function parseCSV(text) {
-            const lines = text.split(/\r?\n/).filter(line => line.trim() !== "");
-            if (lines.length === 0) throw new Error("CSV 檔案為空");
-
-            const firstLineCols = lines[0].split(',');
-            const isFirstLineHeader = isNaN(parseFloat(firstLineCols[2])) || isNaN(parseFloat(firstLineCols[3]));
-            const startIdx = isFirstLineHeader ? 1 : 0;
+            const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+            nodes = lines.slice(1).map(line => {
+                const c = line.split(',');
+                return { id: c[0].trim(), name: c[1].trim(), lng: parseFloat(c[2]), lat: parseFloat(c[3]) };
+            }).filter(n => !isNaN(n.lng));
             
-            nodes = lines.slice(startIdx).map(line => {
-                const cols = line.split(',');
-                if (cols.length < 4) return null;
-                return {
-                    id: cols[0].trim(),
-                    name: cols[1].trim() || cols[0].trim(),
-                    lng: parseFloat(cols[2]),
-                    lat: parseFloat(cols[3])
-                };
-            }).filter(n => n && n.id && !isNaN(n.lng) && !isNaN(n.lat));
-
-            if (nodes.length === 0) throw new Error("找不到有效的座標資料");
-            
-            nodes.forEach(n => {
-                n.rowGroup = n.id.replace(/[^0-9]/g, '');
-                n.colGroup = n.id.replace(/[0-9]/g, '');
-            });
-
             const lngs = nodes.map(n => n.lng), lats = nodes.map(n => n.lat);
-            geoExtents = {
-                minLng: Math.min(...lngs), maxLng: Math.max(...lngs),
-                minLat: Math.min(...lats), maxLat: Math.max(...lats)
-            };
-            buildAutoEdges();
-            resize();
+            geoExtents = { minLng: Math.min(...lngs), maxLng: Math.max(...lngs), minLat: Math.min(...lats), maxLat: Math.max(...lats) };
+            
+            // 自動連線邏輯 (同前)
+            buildEdges();
         }
 
-        async function tryAutoRouting() {
-            return new Promise((resolve) => {
-                const useDefaultFallback = (reason) => {
-                    console.log(`使用預設路徑 (${reason})`);
-                    userCoordsEl.innerText = reason;
-                    userCoordsEl.classList.replace('text-emerald-500/80', 'text-red-400');
-                    gpsIndicator.classList.replace('bg-emerald-500', 'bg-red-500');
-                    
-                    startId = findClosestNodeId(CAMPUS_LOCATIONS.MAIN.lng, CAMPUS_LOCATIONS.MAIN.lat);
-                    endId = findClosestNodeId(CAMPUS_LOCATIONS.CHENG_ZHONG.lng, CAMPUS_LOCATIONS.CHENG_ZHONG.lat);
-                    if (startId && endId) {
-                        path = solvePath(startId, endId);
-                        updateNavInfo(nodes.find(n => n.id === endId));
-                    }
-                    resolve();
-                };
+        function buildEdges() {
+            edges = [];
+            const rows = [...new Set(nodes.map(n => n.id.replace(/[^0-9]/g, '')))];
+            rows.forEach(r => {
+                const group = nodes.filter(n => n.id.includes(r)).sort((a,b) => a.lng - b.lng);
+                for(let i=0; i<group.length-1; i++) edges.push({f: group[i].id, t: group[i+1].id, d: calcDist(group[i], group[i+1])});
+            });
+            const cols = [...new Set(nodes.map(n => n.id.replace(/[0-9]/g, '')))];
+            cols.forEach(c => {
+                const group = nodes.filter(n => n.id.includes(c)).sort((a,b) => b.lat - a.lat);
+                for(let i=0; i<group.length-1; i++) edges.push({f: group[i].id, t: group[i+1].id, d: calcDist(group[i], group[i+1])});
+            });
+        }
 
-                if (!navigator.geolocation) {
-                    useDefaultFallback("不支援定位");
-                    return;
+        function calcDist(n1, n2) {
+            return Math.hypot((n1.lng-n2.lng)*92000, (n1.lat-n2.lat)*111000);
+        }
+
+        function startTracking() {
+            navigator.geolocation.watchPosition(pos => {
+                const { latitude: lat, longitude: lng } = pos.coords;
+                lastKnownPos = { lat, lng };
+                userCoordsEl.innerText = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+                gpsIndicator.className = "flex h-2 w-2 rounded-full bg-emerald-500";
+                
+                // 只有在還沒鎖定時，才自動設為起點
+                if (!isStartLocked) {
+                    startId = findClosest(lng, lat);
+                    isStartLocked = true;
+                    loadingOverlay.classList.add('hidden');
                 }
 
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        const userLat = position.coords.latitude;
-                        const userLng = position.coords.longitude;
-                        
-                        // 更新 UI 座標顯示
-                        userCoordsEl.innerText = `${userLat.toFixed(6)}, ${userLng.toFixed(6)}`;
-                        userCoordsEl.classList.replace('text-red-400', 'text-emerald-500/80');
-                        gpsIndicator.classList.replace('bg-red-500', 'bg-emerald-500');
-
-                        const distToMain = calcGeoDist({lat: userLat, lng: userLng}, CAMPUS_LOCATIONS.MAIN);
-                        const distToCheng = calcGeoDist({lat: userLat, lng: userLng}, CAMPUS_LOCATIONS.CHENG_ZHONG);
-                        
-                        let targetStart, targetEnd;
-                        if (distToCheng < distToMain) {
-                            targetStart = CAMPUS_LOCATIONS.CHENG_ZHONG;
-                            targetEnd = CAMPUS_LOCATIONS.MAIN;
-                            userRegionEl.innerText = "靠近城中校區";
-                        } else {
-                            targetStart = CAMPUS_LOCATIONS.MAIN;
-                            targetEnd = CAMPUS_LOCATIONS.CHENG_ZHONG;
-                            userRegionEl.innerText = "靠近校本部";
-                        }
-
-                        startId = findClosestNodeId(targetStart.lng, targetStart.lat);
-                        endId = findClosestNodeId(targetEnd.lng, targetEnd.lat);
-
-                        if (startId && endId) {
-                            path = solvePath(startId, endId);
-                            updateNavInfo(nodes.find(n => n.id === endId));
-                        }
-                        resolve();
-                    },
-                    (error) => {
-                        let msg = "定位失敗";
-                        if (error.code === 1) msg = "拒絕定位權限";
-                        else if (error.code === 2) msg = "抓不到 GPS 訊號";
-                        else if (error.code === 3) msg = "定位超時";
-                        useDefaultFallback(msg);
-                    },
-                    { timeout: 8000, enableHighAccuracy: true }
-                );
-            });
+                updateUserMarker(lng, lat);
+                draw();
+            }, null, { enableHighAccuracy: true });
         }
 
-        function findClosestNodeId(lng, lat) {
-            let closest = null;
-            let minDist = Infinity;
+        function findClosest(lng, lat) {
+            let best = null, min = Infinity;
             nodes.forEach(n => {
                 const d = Math.hypot(n.lng - lng, n.lat - lat);
-                if (d < minDist) {
-                    minDist = d;
-                    closest = n.id;
-                }
+                if(d < min) { min = d; best = n.id; }
             });
-            return closest;
+            return best;
         }
 
-        function buildAutoEdges() {
-            edges = [];
-            const rowKeys = [...new Set(nodes.map(n => n.rowGroup))];
-            rowKeys.forEach(rk => {
-                const group = nodes.filter(n => n.rowGroup === rk).sort((a, b) => a.lng - b.lng);
-                for(let i=0; i<group.length-1; i++) edges.push({ from: group[i].id, to: group[i+1].id, dist: calcGeoDist(group[i], group[i+1]) });
-            });
-            const colKeys = [...new Set(nodes.map(n => n.colGroup))];
-            colKeys.forEach(ck => {
-                const group = nodes.filter(n => n.colGroup === ck).sort((a, b) => b.lat - a.lat);
-                for(let i=0; i<group.length-1; i++) edges.push({ from: group[i].id, to: group[i+1].id, dist: calcGeoDist(group[i], group[i+1]) });
-            });
-        }
-
-        function calcGeoDist(n1, n2) {
-            const dy = (n1.lat - n2.lat) * 111320;
-            const dx = (n1.lng - n2.lng) * 111320 * Math.cos(n1.lat * Math.PI / 180);
-            return Math.sqrt(dx*dx + dy*dy);
+        function updateUserMarker(lng, lat) {
+            const p = getCanvasPos(lng, lat);
+            userMarker.style.left = `${p.x}px`;
+            userMarker.style.top = `${p.y}px`;
+            userMarker.classList.remove('hidden');
         }
 
         function getCanvasPos(lng, lat) {
-            if (!geoExtents || !width || !height) return { x: 0, y: 0 };
-            const pad = 60;
-            const { minLng, maxLng, minLat, maxLat } = geoExtents;
-            const lngRange = (maxLng - minLng) * Math.cos(minLat * Math.PI / 180);
-            const latRange = maxLat - minLat;
-            const drawW = width - pad * 2, drawH = height - pad * 2;
-            const scale = Math.min(drawW / lngRange, drawH / latRange);
-            const mapW = lngRange * scale, mapH = latRange * scale;
-            const offsetX = pad + (drawW - mapW) / 2, offsetY = pad + (drawH - mapH) / 2;
-            const x = (lng - minLng) * Math.cos(minLat * Math.PI / 180) * scale + offsetX;
-            const y = drawH - (lat - minLat) * scale + offsetY;
+            const pad = 50;
+            const dw = width - pad*2, dh = height - pad*2;
+            const ratio = dw / (geoExtents.maxLng - geoExtents.minLng);
+            const x = (lng - geoExtents.minLng) * ratio + pad;
+            const y = dh - (lat - geoExtents.minLat) * (dh / (geoExtents.maxLat - geoExtents.minLat)) + pad;
             return { x, y };
         }
 
-        function solvePath(s, e) {
+        function draw() {
+            if(!nodes.length) return;
+            ctx.clearRect(0,0,width,height);
+            
+            // 繪製網格線
+            ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+            edges.forEach(e => {
+                const p1 = getCanvasPos(nodes.find(n=>n.id===e.f).lng, nodes.find(n=>n.id===e.f).lat);
+                const p2 = getCanvasPos(nodes.find(n=>n.id===e.t).lng, nodes.find(n=>n.id===e.t).lat);
+                ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+            });
+
+            // 繪製路徑
+            if(path.length > 1) {
+                ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 5; ctx.lineJoin = 'round';
+                ctx.beginPath();
+                path.forEach((id, i) => {
+                    const n = nodes.find(v=>v.id===id), p = getCanvasPos(n.lng, n.lat);
+                    if(i===0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+                });
+                ctx.stroke();
+            }
+
+            // 繪製節點
+            nodes.forEach(n => {
+                const p = getCanvasPos(n.lng, n.lat);
+                if(n.id === startId) {
+                    ctx.fillStyle = '#10b981'; ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, 7); ctx.fill();
+                    ctx.fillStyle = '#fff'; ctx.fillText("起點", p.x-10, p.y-15);
+                } else if(n.id === endId) {
+                    ctx.fillStyle = '#f59e0b'; ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, 7); ctx.fill();
+                    ctx.fillStyle = '#fff'; ctx.fillText(n.name, p.x-10, p.y-15);
+                } else {
+                    ctx.fillStyle = '#334155'; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, 7); ctx.fill();
+                }
+            });
+        }
+
+        canvas.addEventListener('click', e => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            let closest = null, min = 30;
+            nodes.forEach(n => {
+                const p = getCanvasPos(n.lng, n.lat);
+                const d = Math.hypot(p.x - x, p.y - y);
+                if(d < min) { min = d; closest = n.id; }
+            });
+            if(closest && closest !== startId) {
+                endId = closest;
+                path = solve(startId, endId);
+                const n = nodes.find(v=>v.id===endId);
+                navText.innerText = `目標：${n.name}`;
+                draw();
+            }
+        });
+
+        function solve(s, e) {
             const dist = {}, prev = {}, q = new Set();
-            nodes.forEach(n => { dist[n.id] = Infinity; prev[n.id] = null; q.add(n.id); });
+            nodes.forEach(n => { dist[n.id] = Infinity; q.add(n.id); });
             dist[s] = 0;
             while(q.size > 0) {
                 let u = null;
-                for(let id of q) if(u === null || dist[id] < dist[u]) u = id;
-                if(dist[u] === Infinity || u === e) break;
+                q.forEach(id => { if(!u || dist[id] < dist[u]) u = id; });
+                if(u === e || dist[u] === Infinity) break;
                 q.delete(u);
-                edges.filter(ed => ed.from === u || ed.to === u).forEach(ed => {
-                    const v = ed.from === u ? ed.to : ed.from;
+                edges.filter(ed => ed.f === u || ed.t === u).forEach(ed => {
+                    const v = ed.f === u ? ed.t : ed.f;
                     if(!q.has(v)) return;
-                    const alt = dist[u] + ed.dist;
+                    const alt = dist[u] + ed.d;
                     if(alt < dist[v]) { dist[v] = alt; prev[v] = u; }
                 });
             }
             const res = []; let curr = e;
             while(curr) { res.unshift(curr); curr = prev[curr]; }
-            return res.length > 1 && res[0] === s ? res : [];
+            return res;
         }
 
-        function updateNavInfo(targetNode) {
-            if (path.length > 0) {
-                const startNode = nodes.find(n => n.id === startId);
-                const m = Math.round(path.reduce((acc, id, i) => i === 0 ? 0 : acc + calcGeoDist(nodes.find(v => v.id === path[i-1]), nodes.find(v => v.id === id)), 0));
-                navText.innerText = `從 ${startNode.name} 往 ${targetNode.name}`;
-                navDist.innerText = `導航路徑: 約 ${m} 公尺`;
-            } else {
-                navText.innerText = `選定點: ${targetNode.name}`;
-                navDist.innerText = "請選取目的地點位";
-            }
-        }
-
-        function draw() {
-            if(!nodes.length || !width || !height) return;
-            ctx.clearRect(0, 0, width, height);
-            ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
-            edges.forEach(e => {
-                const n1 = nodes.find(n => n.id === e.from), n2 = nodes.find(n => n.id === e.to);
-                if (n1 && n2) {
-                    const p1 = getCanvasPos(n1.lng, n1.lat), p2 = getCanvasPos(n2.lng, n2.lat);
-                    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
-                }
-            });
-            if(path.length > 1) {
-                ctx.strokeStyle = '#10b981'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-                ctx.beginPath();
-                path.forEach((id, i) => {
-                    const n = nodes.find(node => node.id === id), p = getCanvasPos(n.lng, n.lat);
-                    if(i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-                });
-                ctx.stroke();
-            }
-            nodes.forEach(n => {
-                const p = getCanvasPos(n.lng, n.lat);
-                const isS = n.id === startId, isE = n.id === endId;
-                ctx.fillStyle = isS ? '#10b981' : (isE ? '#f59e0b' : '#334155');
-                ctx.beginPath(); ctx.arc(p.x, p.y, (isS || isE) ? 8 : 4, 0, Math.PI*2); ctx.fill();
-                if(isS || isE) {
-                    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
-                    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
-                    ctx.fillText(n.name, p.x, p.y - 15);
-                }
-            });
-        }
-
-        canvas.addEventListener('mousedown', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left, y = e.clientY - rect.top;
-            let closest = null, minDist = 25;
-            nodes.forEach(n => {
-                const p = getCanvasPos(n.lng, n.lat);
-                const d = Math.hypot(p.x - x, p.y - y);
-                if(d < minDist) { minDist = d; closest = n.id; }
-            });
-            if(closest) {
-                const cNode = nodes.find(n => n.id === closest);
-                if(!startId || (startId && endId)) {
-                    startId = closest; endId = null; path = [];
-                    updateNavInfo(cNode);
-                } else if (closest !== startId) {
-                    endId = closest;
-                    path = solvePath(startId, endId);
-                    updateNavInfo(cNode);
-                }
+        function relockStart() {
+            if (lastKnownPos) {
+                startId = findClosest(lastKnownPos.lng, lastKnownPos.lat);
+                if (endId) path = solve(startId, endId);
                 draw();
             }
-        });
-
-        function refreshData() {
-            loadingOverlay.style.display = 'flex'; loadingOverlay.style.opacity = '1';
-            loaderIcon.style.display = 'inline-block'; loaderMsg.innerText = "正在重新獲取 GPS 定位...";
-            fetchSheetData();
         }
 
-        function resetPath() { startId = null; endId = null; path = []; navText.innerText = "路徑已重設"; navDist.innerText = "請點擊地圖點位"; draw(); }
-        function fadeOutOverlay() { loadingOverlay.style.opacity = '0'; setTimeout(() => loadingOverlay.style.display = 'none', 500); }
-        function updateSyncStatus(type, message) {
-            syncStatusText.innerText = message;
-            statusDot.className = "flex h-2 w-2 rounded-full " + (type === 'syncing' ? 'bg-yellow-500 animate-pulse' : (type === 'success' ? 'bg-emerald-500' : 'bg-red-500'));
-        }
-        function showError(msg) { updateSyncStatus('error', '失敗'); loaderIcon.style.display = 'none'; loaderMsg.innerHTML = `<div class="text-red-500 font-bold">錯誤：${msg}</div>`; }
+        function resetPath() { endId = null; path = []; navText.innerText = "請選擇終點"; draw(); }
+
         function resize() {
-            const container = canvas.parentElement; if (!container) return;
-            width = container.clientWidth; height = container.clientHeight;
+            width = canvas.parentElement.clientWidth; height = canvas.parentElement.clientHeight;
             canvas.width = width; canvas.height = height; draw();
+            if(lastKnownPos) updateUserMarker(lastKnownPos.lng, lastKnownPos.lat);
         }
 
-        window.onload = () => { resize(); fetchSheetData(); };
+        window.onload = init;
         window.onresize = resize;
     </script>
 </body>
