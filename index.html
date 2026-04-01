@@ -3,19 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NTU SmartPath - OSM 遠距偵測</title>
+    <title>NTU SmartPath - 手動點擊導航</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
         body { background-color: #0f172a; color: #f8fafc; font-family: 'Noto Sans TC', sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
-        #map { width: 100%; flex-grow: 1; border-radius: 1rem; border: 1px solid #334155; }
+        #map { width: 100%; flex-grow: 1; border-radius: 1rem; border: 1px solid #334155; cursor: default; }
         
-        /* 隱藏 OSM 預設的縮放按鈕，我們放在右下角 */
-        .leaflet-control-zoom { border: none !important; margin-right: 15px !important; }
-        
+        .leaflet-control-zoom { border: none !important; }
         .glass-panel { background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); }
         
         /* 距離太遠警示 */
@@ -23,56 +20,66 @@
             display: none;
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
             background: #ef4444; color: white; padding: 10px 24px; border-radius: 99px;
-            font-weight: bold; font-size: 15px; z-index: 1000; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
-            animation: pulse-red 2s infinite;
+            font-weight: bold; font-size: 14px; z-index: 1000; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
         }
-        @keyframes pulse-red { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
 
-        /* 自定義使用者藍點 */
         .user-location-icon {
             width: 14px; height: 14px; background: #3b82f6; border: 2px solid white;
             border-radius: 50%; box-shadow: 0 0 10px rgba(59, 130, 246, 0.8);
+        }
+
+        /* 點選提示 */
+        #click-hint {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: #fff; padding: 8px 16px; border-radius: 8px;
+            font-size: 12px; z-index: 1000; pointer-events: none; border: 1px solid #3b82f6;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
         }
     </style>
 </head>
 <body class="p-4 md:p-6 gap-4">
 
-    <div id="far-warning">🚀 你的距離太遠啦～ (顯示全域地圖)</div>
+    <div id="far-warning">🚀 GPS 距離過遠 (顯示 OSM 全域地圖)</div>
 
     <header class="flex justify-between items-center shrink-0">
         <div>
-            <h1 class="text-xl md:text-2xl font-bold text-emerald-500 flex items-center gap-2">
-                NTU SmartPath
-            </h1>
-            <p class="text-slate-400 text-[10px] md:text-xs">OSM 底圖輔助系統</p>
+            <h1 class="text-xl md:text-2xl font-bold text-emerald-500">NTU SmartPath</h1>
+            <p class="text-slate-400 text-[10px] md:text-xs">手動點擊地圖圓點進行導航</p>
         </div>
         <div class="flex items-center gap-2 text-[10px] md:text-xs text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700">
             <span id="status-dot" class="h-2 w-2 rounded-full bg-emerald-500"></span>
-            <span id="status-text">系統運作中</span>
+            <span id="status-text">系統連線中</span>
         </div>
     </header>
 
-    <div class="flex flex-col lg:flex-row gap-4 flex-grow min-h-0">
+    <div class="flex flex-col lg:flex-row gap-4 flex-grow min-h-0 relative">
+        <div id="click-hint">提示：直接點擊地圖上的「圓點」設定起點/終點</div>
+
         <!-- Sidebar -->
         <div class="lg:w-80 space-y-4 shrink-0 flex flex-col">
             <div class="glass-panel p-5 rounded-2xl border-l-4 border-blue-500 shadow-xl">
-                <h2 class="text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">目前狀態</h2>
-                <div id="nav-text" class="font-bold text-base text-blue-400">正在獲取 GPS...</div>
-                <div id="nav-dist" class="text-xs text-slate-400 mt-1 italic">--</div>
+                <h2 class="text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">路徑規劃</h2>
+                <div id="nav-text" class="font-bold text-base text-blue-400">請選取圓點...</div>
+                <div id="nav-dist" class="text-xs text-slate-400 mt-1 italic">點擊兩個目標點計算距離</div>
             </div>
 
             <div class="glass-panel p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
-                <span class="text-[10px] font-bold text-slate-500 uppercase">GPS 座標</span>
-                <div id="user-coords" class="font-mono text-xs text-blue-400/80 mt-1">等待中...</div>
-                <div id="campus-tag" class="mt-3 text-[10px] text-emerald-400 font-bold bg-emerald-400/10 px-2 py-1 rounded inline-block">--</div>
+                <div class="flex justify-between items-center">
+                    <span class="text-[10px] font-bold text-slate-500 uppercase">操作控制</span>
+                    <span id="mode-tag" class="text-[9px] px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded">點擊模式</span>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                    <button onclick="clearSelection()" class="flex-1 bg-slate-700 hover:bg-slate-600 text-white text-[11px] py-2 rounded-lg transition">清除選點</button>
+                    <button onclick="zoomToCampus()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-[11px] py-2 rounded-lg transition">縮放至校區</button>
+                </div>
             </div>
 
-            <button onclick="zoomToCampus()" class="bg-slate-800 hover:bg-slate-700 py-3 rounded-xl text-xs transition border border-white/5 text-slate-300 font-bold">
-                回到校區中心
-            </button>
-            <button onclick="zoomToAll()" class="bg-blue-600 hover:bg-blue-500 py-3 rounded-xl text-xs transition border border-white/5 text-white font-bold">
-                同時查看我與校區
-            </button>
+            <div class="glass-panel p-4 rounded-xl border border-slate-700/50 flex-grow overflow-y-auto hidden lg:block">
+                <h3 class="text-[10px] font-bold text-slate-500 mb-2">節點清單</h3>
+                <div id="node-count" class="text-[9px] text-emerald-400 mb-2 italic">載入中...</div>
+                <div id="node-list" class="text-[10px] space-y-1 text-slate-400 font-mono">
+                </div>
+            </div>
         </div>
 
         <!-- Map Container -->
@@ -82,24 +89,18 @@
     <script>
         const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTpvlZRFEaEAWJxpF58fNWLnZuq7AUPFApMLme3V3c0JkdsGdgVrZSKxwj2VlTOKDvbX6ZJSmiokFA1/pub?output=csv";
         
-        // 校區參考點
-        const CAMPUS_REFS = {
-            MED: { lat: 25.03966, lng: 121.51973, name: "城中校區" },
-            MAIN: { lat: 25.02180, lng: 121.53558, name: "校本部" }
-        };
-
-        let map, userMarker, roadNetworkLayer;
+        let map, userMarker, roadNetworkLayer, navPathLayer;
         let nodes = [], edges = [];
+        let startNode = null, endNode = null;
         let networkBounds;
+        let nodeMarkers = [];
 
         function initMap() {
-            // 初始化 Leaflet 地圖 (預設為校本部中心)
             map = L.map('map', {
                 zoomControl: true,
                 attributionControl: false
-            }).setView([25.02180, 121.53558], 15);
+            }).setView([25.02180, 121.53558], 17);
 
-            // 加入 OpenStreetMap 底圖 (使用 Dark Matter 風格較符合 UI，或者標準 OSM)
             L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                 maxZoom: 19
             }).addTo(map);
@@ -113,97 +114,213 @@
                 const text = await res.text();
                 parseData(text);
                 startTracking();
-            } catch (e) { console.error("數據載入失敗", e); }
+                document.getElementById('status-text').innerText = "數據同步成功";
+            } catch (e) { 
+                console.error("載入失敗", e); 
+                document.getElementById('status-text').innerText = "數據連線錯誤";
+                document.getElementById('status-dot').className = "h-2 w-2 rounded-full bg-red-500";
+            }
         }
 
         function parseData(text) {
             const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
-            nodes = lines.slice(1).map(line => {
-                const c = line.split(',');
-                return { id: c[0].trim(), name: c[1].trim(), lng: parseFloat(c[2]), lat: parseFloat(c[3]) };
-            }).filter(n => !isNaN(n.lng));
+            const tempRows = lines.map(line => line.split(',').map(c => c.replace(/"/g, '').trim()));
+            
+            const hasHeader = isNaN(parseFloat(tempRows[0][2]));
+            const dataRows = hasHeader ? tempRows.slice(1) : tempRows;
 
-            // 建立路網邊界
+            nodes = dataRows.map(r => ({
+                id: r[0], 
+                name: r[1], 
+                lng: parseFloat(r[2]), 
+                lat: parseFloat(r[3])
+            })).filter(n => !isNaN(n.lng) && !isNaN(n.lat));
+
+            document.getElementById('node-count').innerText = `已同步 ${nodes.length} 個節點`;
+            
             const lats = nodes.map(n => n.lat);
             const lngs = nodes.map(n => n.lng);
             networkBounds = L.latLngBounds([Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]);
 
-            // 繪製路網
+            buildGraphEdges();
             renderNetwork();
+            renderNodeMarkers(); // 渲染可點擊的大圓點
+        }
+
+        function buildGraphEdges() {
+            edges = [];
+            const rowKeys = [...new Set(nodes.map(n => n.id.replace(/[^0-9]/g, '')))];
+            rowKeys.forEach(rk => {
+                const group = nodes.filter(n => n.id.replace(/[^0-9]/g, '') === rk).sort((a, b) => a.lng - b.lng);
+                for(let i=0; i<group.length-1; i++) addEdge(group[i], group[i+1]);
+            });
+            const colKeys = [...new Set(nodes.map(n => n.id.replace(/[0-9]/g, '')))];
+            colKeys.forEach(ck => {
+                const group = nodes.filter(n => n.id.replace(/[0-9]/g, '') === ck).sort((a, b) => b.lat - a.lat);
+                for(let i=0; i<group.length-1; i++) addEdge(group[i], group[i+1]);
+            });
+        }
+
+        function addEdge(n1, n2) {
+            const d = L.latLng(n1.lat, n1.lng).distanceTo(L.latLng(n2.lat, n2.lng));
+            edges.push({ from: n1.id, to: n2.id, dist: d });
         }
 
         function renderNetwork() {
             if (roadNetworkLayer) map.removeLayer(roadNetworkLayer);
-            
             const polylineGroup = [];
-            // 這裡簡單繪製格狀連線 (邏輯同前一版本)
-            const rows = [...new Set(nodes.map(n => n.id.replace(/[^0-9]/g, '')))];
-            rows.forEach(r => {
-                const group = nodes.filter(n => n.id.includes(r)).sort((a,b) => a.lng - b.lng);
-                for(let i=0; i<group.length-1; i++) polylineGroup.push([[group[i].lat, group[i].lng], [group[i+1].lat, group[i+1].lng]]);
+            edges.forEach(e => {
+                const n1 = nodes.find(n => n.id === e.from);
+                const n2 = nodes.find(n => n.id === e.to);
+                if (n1 && n2) polylineGroup.push([[n1.lat, n1.lng], [n2.lat, n2.lng]]);
             });
-            const cols = [...new Set(nodes.map(n => n.id.replace(/[0-9]/g, '')))];
-            cols.forEach(c => {
-                const group = nodes.filter(n => n.id.includes(c)).sort((a,b) => b.lat - a.lat);
-                for(let i=0; i<group.length-1; i++) polylineGroup.push([[group[i].lat, group[i].lng], [group[i+1].lat, group[i+1].lng]]);
-            });
+            roadNetworkLayer = L.polyline(polylineGroup, { color: '#ffffff', weight: 1.5, opacity: 0.15 }).addTo(map);
+        }
 
-            roadNetworkLayer = L.polyline(polylineGroup, { color: '#475569', weight: 1, opacity: 0.6 }).addTo(map);
+        function renderNodeMarkers() {
+            nodeMarkers.forEach(m => map.removeLayer(m));
+            nodeMarkers = [];
+
+            nodes.forEach(node => {
+                // 加大可點擊圓點的半徑 (原本 2-3, 現在 8-10)
+                const marker = L.circleMarker([node.lat, node.lng], {
+                    radius: 8, 
+                    fillColor: "#475569", 
+                    color: "#94a3b8", 
+                    weight: 1, 
+                    fillOpacity: 0.6,
+                    className: 'node-marker'
+                }).addTo(map);
+
+                marker.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    handleNodeSelect(node);
+                });
+
+                // 滑鼠移入放大效果
+                marker.on('mouseover', function() {
+                    this.setStyle({ radius: 12, fillColor: "#3b82f6", fillOpacity: 0.9 });
+                });
+                marker.on('mouseout', function() {
+                    this.setStyle({ radius: 8, fillColor: "#475569", fillOpacity: 0.6 });
+                });
+
+                nodeMarkers.push(marker);
+            });
+        }
+
+        function handleNodeSelect(node) {
+            if (!startNode || (startNode && endNode)) {
+                startNode = node;
+                endNode = null;
+                document.getElementById('nav-text').innerText = "起點：" + startNode.name;
+                document.getElementById('nav-dist').innerText = "請點擊另一個圓點作為終點...";
+            } else {
+                if (node.id === startNode.id) return;
+                endNode = node;
+                calculatePath();
+            }
+            updateSelectionMarkers();
+        }
+
+        let activeSelectionMarkers = [];
+        function updateSelectionMarkers() {
+            activeSelectionMarkers.forEach(m => map.removeLayer(m));
+            activeSelectionMarkers = [];
+            
+            if (startNode) {
+                const m = L.circleMarker([startNode.lat, startNode.lng], { 
+                    radius: 12, color: '#10b981', fillOpacity: 1, weight: 3, fillColor: '#10b981' 
+                }).addTo(map);
+                m.bindTooltip("起點", { permanent: true, direction: 'top', className: 'bg-emerald-500 border-none text-white text-[10px] rounded px-2' });
+                activeSelectionMarkers.push(m);
+            }
+            if (endNode) {
+                const m = L.circleMarker([endNode.lat, endNode.lng], { 
+                    radius: 12, color: '#ef4444', fillOpacity: 1, weight: 3, fillColor: '#ef4444' 
+                }).addTo(map);
+                m.bindTooltip("終點", { permanent: true, direction: 'top', className: 'bg-red-500 border-none text-white text-[10px] rounded px-2' });
+                activeSelectionMarkers.push(m);
+            }
+        }
+
+        function calculatePath() {
+            const pathIds = dijkstra(startNode.id, endNode.id);
+            if (navPathLayer) map.removeLayer(navPathLayer);
+            
+            if (pathIds.length > 0) {
+                const pathCoords = pathIds.map(id => {
+                    const n = nodes.find(v => v.id === id);
+                    return [n.lat, n.lng];
+                });
+                navPathLayer = L.polyline(pathCoords, { color: '#3b82f6', weight: 8, opacity: 0.9, lineJoin: 'round' }).addTo(map);
+                
+                let totalDist = 0;
+                for(let i=0; i<pathIds.length-1; i++) {
+                    const u = pathIds[i], v = pathIds[i+1];
+                    const edge = edges.find(e => (e.from === u && e.to === v) || (e.from === v && e.to === u));
+                    totalDist += edge ? edge.dist : 0;
+                }
+                
+                document.getElementById('nav-text').innerText = `${startNode.name} ➔ ${endNode.name}`;
+                document.getElementById('nav-dist').innerText = `最短路徑距離：${Math.round(totalDist)} 公尺`;
+            } else {
+                document.getElementById('nav-text').innerText = "路網未連結";
+                document.getElementById('nav-dist').innerText = "這兩個圓點之間無路徑";
+            }
+        }
+
+        function dijkstra(startId, endId) {
+            const dist = {}, prev = {}, q = new Set();
+            nodes.forEach(n => { dist[n.id] = Infinity; prev[n.id] = null; q.add(n.id); });
+            dist[startId] = 0;
+
+            while (q.size > 0) {
+                let u = null;
+                q.forEach(id => { if (u === null || dist[id] < dist[u]) u = id; });
+                if (u === endId || dist[u] === Infinity) break;
+                q.delete(u);
+
+                const neighbors = edges.filter(e => e.from === u || e.to === u);
+                neighbors.forEach(e => {
+                    const v = e.from === u ? e.to : e.from;
+                    if (!q.has(v)) return;
+                    const alt = dist[u] + e.dist;
+                    if (alt < dist[v]) { dist[v] = alt; prev[v] = u; }
+                });
+            }
+
+            const path = [];
+            let curr = endId;
+            while (curr) { path.unshift(curr); curr = prev[curr]; }
+            return path[0] === startId ? path : [];
+        }
+
+        function clearSelection() {
+            startNode = null; endNode = null;
+            if (navPathLayer) map.removeLayer(navPathLayer);
+            updateSelectionMarkers();
+            document.getElementById('nav-text').innerText = "請選取圓點...";
+            document.getElementById('nav-dist').innerText = "點擊兩個目標點計算距離";
         }
 
         function startTracking() {
+            if (!navigator.geolocation) return;
             navigator.geolocation.watchPosition(pos => {
                 const { latitude: lat, longitude: lng } = pos.coords;
                 const userLatLng = L.latLng(lat, lng);
-                
-                // 更新 UI
-                document.getElementById('user-coords').innerText = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-                
-                // 距離判斷 (使用 Leaflet 的 distanceTo，單位為公尺)
-                const distToMed = userLatLng.distanceTo([CAMPUS_REFS.MED.lat, CAMPUS_REFS.MED.lng]);
-                const distToMain = userLatLng.distanceTo([CAMPUS_REFS.MAIN.lat, CAMPUS_REFS.MAIN.lng]);
-                const minDist = Math.min(distToMed, distToMain);
-
-                const farWarning = document.getElementById('far-warning');
-                const navText = document.getElementById('nav-text');
-                const navDist = document.getElementById('nav-dist');
-
-                if (minDist > 4000) {
-                    farWarning.style.display = "block";
-                    navText.innerText = "你的距離太遠啦～";
-                    navDist.innerText = `目前距離最近校區約 ${(minDist/1000).toFixed(1)} km`;
-                    
-                    // 自動縮放以包含使用者與路網
-                    zoomToAll(userLatLng);
-                } else {
-                    farWarning.style.display = "none";
-                    navText.innerText = "已進入校園偵測範圍";
-                    navDist.innerText = "地圖已鎖定你的位置";
-                }
-
-                // 更新藍點位置
                 if (!userMarker) {
-                    const icon = L.divIcon({ className: 'user-location-icon', iconSize: [14, 14] });
-                    userMarker = L.marker(userLatLng, { icon }).addTo(map);
+                    userMarker = L.marker(userLatLng, { icon: L.divIcon({ className: 'user-location-icon', iconSize: [14, 14] }) }).addTo(map);
                 } else {
                     userMarker.setLatLng(userLatLng);
                 }
-
-            }, err => console.error(err), { enableHighAccuracy: true });
+                const distToCampus = userLatLng.distanceTo([25.02180, 121.53558]);
+                document.getElementById('far-warning').style.display = distToCampus > 5000 ? "block" : "none";
+            }, null, { enableHighAccuracy: true });
         }
 
-        function zoomToAll(customUserLatLng = null) {
-            let combinedBounds = L.latLngBounds(networkBounds);
-            if (customUserLatLng) {
-                combinedBounds.extend(customUserLatLng);
-            } else if (userMarker) {
-                combinedBounds.extend(userMarker.getLatLng());
-            }
-            map.fitBounds(combinedBounds, { padding: [50, 50] });
-        }
-
-        function zoomToCampus() {
-            map.fitBounds(networkBounds);
+        function zoomToCampus() { 
+            if (networkBounds) map.fitBounds(networkBounds, { padding: [40, 40] }); 
         }
 
         window.onload = initMap;
