@@ -39,7 +39,7 @@
 </head>
 <body class="p-4 md:p-6 gap-4">
 
-    <div id="far-warning">📍 正在校外 (距離 > 4km)：已自動縮放包含您的位置與校區</div>
+    <div id="far-warning">📍 正在校外 (距離 > 4km)：已自動顯示全域視角</div>
 
     <header class="flex justify-between items-center shrink-0">
         <div>
@@ -89,7 +89,12 @@
 
     <script>
         const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTpvlZRFEaEAWJxpF58fNWLnZuq7AUPFApMLme3V3c0JkdsGdgVrZSKxwj2VlTOKDvbX6ZJSmiokFA1/pub?output=csv";
-        const CAMPUS_CENTER = [25.02180, 121.53558]; // 校區路網大致中心
+        
+        // 兩校區座標點
+        const CAMPUS_REFS = {
+            MAIN: { lat: 25.02180, lng: 121.53558, name: "校本部" },
+            MED: { lat: 25.03966, lng: 121.51973, name: "城中校區" }
+        };
         const DIST_THRESHOLD = 4000; // 4公里閾值
         
         let map, userMarker, roadNetworkLayer, navPathLayer;
@@ -98,12 +103,14 @@
         let networkBounds = null;
         let nodeMarkers = [];
         let hasAutoCentered = false;
+        let hasAutoSelected = false; // 新增：是否已執行過自動校區選取
 
         function initMap() {
+            const initialBounds = L.latLngBounds([CAMPUS_REFS.MAIN, CAMPUS_REFS.MED]);
             map = L.map('map', {
                 zoomControl: true,
                 attributionControl: false
-            }).setView(CAMPUS_CENTER, 16);
+            }).fitBounds(initialBounds, { padding: [50, 50] });
 
             L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                 maxZoom: 19,
@@ -261,6 +268,15 @@
             return path[0] === sId ? path : [];
         }
 
+        function findClosestNode(lat, lng) {
+            let minD = Infinity, closest = null;
+            nodes.forEach(n => {
+                const d = L.latLng(lat, lng).distanceTo(L.latLng(n.lat, n.lng));
+                if (d < minD) { minD = d; closest = n; }
+            });
+            return closest;
+        }
+
         function startTracking() {
             if (!navigator.geolocation) return;
             navigator.geolocation.watchPosition(pos => {
@@ -273,13 +289,11 @@
                     userMarker.setLatLng(userLatLng);
                 }
 
-                // 計算與校園中心點的距離
-                const distToCampus = userLatLng.distanceTo(CAMPUS_CENTER);
-                const isFar = distToCampus > DIST_THRESHOLD; // 使用 4km 閾值
+                const distToMain = userLatLng.distanceTo(L.latLng(CAMPUS_REFS.MAIN.lat, CAMPUS_REFS.MAIN.lng));
+                const isFar = distToMain > DIST_THRESHOLD; 
 
                 if (isFar) {
                     document.getElementById('far-warning').style.display = "block";
-                    // 初始觸發自動中心化
                     if (!hasAutoCentered && networkBounds) {
                         const combinedBounds = networkBounds.extend(userLatLng);
                         map.fitBounds(combinedBounds, { padding: [80, 80], maxZoom: 14 });
@@ -287,26 +301,49 @@
                     }
                 } else {
                     document.getElementById('far-warning').style.display = "none";
+                    
+                    // 自動判斷起終點：距離校園範圍 < 4km 且尚未自動選取過
+                    if (!hasAutoSelected && nodes.length > 0) {
+                        const distToMed = userLatLng.distanceTo(L.latLng(CAMPUS_REFS.MED.lat, CAMPUS_REFS.MED.lng));
+                        
+                        let sRef, eRef;
+                        if (distToMain < distToMed) {
+                            // 靠近校本部
+                            sRef = CAMPUS_REFS.MAIN; eRef = CAMPUS_REFS.MED;
+                            showToast("偵測到靠近校本部，自動規劃至城中路線");
+                        } else {
+                            // 靠近城中
+                            sRef = CAMPUS_REFS.MED; eRef = CAMPUS_REFS.MAIN;
+                            showToast("偵測到靠近城中校區，自動規劃至本部路線");
+                        }
+                        
+                        startNode = findClosestNode(sRef.lat, sRef.lng);
+                        endNode = findClosestNode(eRef.lat, eRef.lng);
+                        
+                        if (startNode && endNode) {
+                            calculatePath();
+                            updateSelectionMarkers();
+                            hasAutoSelected = true;
+                        }
+                    }
                 }
             }, null, { enableHighAccuracy: true });
         }
 
         function zoomToCampus() { 
-            if (networkBounds) {
-                // 點擊後放大到校區，即便原本在遠處
-                map.fitBounds(networkBounds, { padding: [50, 50] });
-                setTimeout(() => {
-                    if (map.getZoom() < 16) map.setZoom(17);
-                }, 400);
-                showToast("已鎖定校園路網區域");
-            } 
+            const campusBounds = L.latLngBounds(
+                [CAMPUS_REFS.MAIN.lat, CAMPUS_REFS.MAIN.lng], 
+                [CAMPUS_REFS.MED.lat, CAMPUS_REFS.MED.lng]
+            );
+            map.fitBounds(campusBounds, { padding: [100, 100] });
+            showToast("已縮放至校區全景");
         }
 
         function showToast(msg) {
             const h = document.getElementById('click-hint');
             const old = h.innerText;
             h.innerText = msg;
-            setTimeout(() => h.innerText = old, 3000);
+            setTimeout(() => h.innerText = "提示：點擊圓點即可設定路線", 3000);
         }
 
         function clearSelection() {
@@ -315,6 +352,7 @@
             updateSelectionMarkers();
             document.getElementById('nav-text').innerText = "請選取圓點...";
             document.getElementById('nav-dist').innerText = "點擊兩個目標點計算距離";
+            hasAutoSelected = true; // 清除後不再自動觸發，除非重新整理
         }
 
         window.onload = initMap;
